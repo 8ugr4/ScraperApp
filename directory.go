@@ -1,7 +1,7 @@
 package main
 
 import "fmt"
-//NOT FIXED
+// fixed, now implement directory and file creating inside this one.
 type Directory struct { //Transmission
 }
 
