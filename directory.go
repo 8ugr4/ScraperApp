@@ -1,7 +1,7 @@
 package main
 
 import "fmt"
-
+//NOT FIXED
 type Directory struct { //Transmission
 }
 
