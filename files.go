@@ -1,7 +1,8 @@
 package main
 
 import "fmt"
-//NOT FIXED
+// fixed.
+// now implement actual file control in this one.
 type files struct { //engine
 	a string
 }
