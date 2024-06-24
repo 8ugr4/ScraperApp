@@ -1,21 +1,24 @@
 package main
 
-import "fmt"
-// fixed. 
-// now make this into a real dnsResolver or something else. 	
-type directory interface { //transmission
-	createNewDirectory()
+import (
+	"fmt"
+	"io/fs"
+)
+
+type directory interface {
+	createNewDirectory(fsys fs.FS, outputPath string) error
 }
 
-type dnsResolver struct { //convertable
-	files     //engine
-	directory //transmission
+type dnsResolver struct {
+	files
+	directory
 }
 
-func (d dnsResolver) Check() { //convertable
+// STILL GOTTA IMPLEMENT THIS FILE.
+func (d dnsResolver) Check() {
 	fmt.Println("Checking")
 }
-func (d dnsResolver) control(){
-	fmt.Println("checking dnsResolver")
-	d.files.control()
+func (d dnsResolver) control() {
+	fmt.Println("dnsResolver control")
+	//d.files.control()
 }
