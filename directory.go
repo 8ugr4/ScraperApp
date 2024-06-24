@@ -20,11 +20,18 @@ func check(e error) {
 }
 
 // using os module creates a new directory.
-func (d Directory) create() {
+func (d Directory) create() error {
 	err := os.Mkdir(d.outputPath, 0755)
-	check(err)
-
-	defer os.RemoveAll("sub")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err := os.RemoveAll("sub")
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+	return nil
 }
 
 // Checks the name of the directory to be true or false
@@ -40,14 +47,13 @@ func (d Directory) checkName(fsys fs.FS, name string) ([]byte, error) {
 }
 
 // Calls d.create() to create a new directory.
-func (d Directory) createNewDirectory(fsys fs.FS, outputPath string) {
+func (d Directory) createNewDirectory(fsys fs.FS, outputPath string) error {
 	fmt.Println("Creating new directory")
-	var name string = "newDirectory"
+	var name = "newDirectory"
 	//fsys check later
 	_, err := d.checkName(fsys, name)
 	if err != nil {
-		log.Fatalf("err", err)
+		return fmt.Errorf("err:%w", err)
 	}
-	d.create()
-
+	return d.create()
 }
