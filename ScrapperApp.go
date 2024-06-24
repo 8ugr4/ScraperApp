@@ -210,7 +210,8 @@ func main() {
 	inputFile := "C:/Users/Bugra/Desktop/listOfUrl.txt"
 	outputFile := "C:/Users/Bugra/Desktop/reportOfUrl1.txt"
 	newScrapper := dnsResolver{
-		files: files{},
+		files:     files{},
+		directory: Directory{outputPath: outputFile},
 	}
 	startScraping(newScrapper)
 
