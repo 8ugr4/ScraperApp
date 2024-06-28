@@ -98,27 +98,25 @@ func (ct *chTransfer) readFromClick(inChan chan string) error {
 	return nil
 }
 
-func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
+func (ct *chTransfer) DebugOutCh(ch1 chan *Response) {
 	conn, err := connect()
 	if err != nil {
-		log.Fatalf("err5 %v", err)
+		log.Fatal("connection error :%v \n", err)
 	}
 
 	ctx := context.Background()
 
-	//rows, err := conn.Query(ctx, "CHECK_TABLE OutputTable")
-
 	err = conn.Exec(ctx,
 		"CREATE TABLE IF NOT EXISTS OutputTable(url String, status String,body_length Int)engine = MergeTree()order by status;")
-
 	if err != nil {
-		log.Fatalf("error6 : %v \n", err)
+		log.Fatalf("error12 : %v \n", err)
 	}
 
 	batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
 	if err != nil {
 		log.Fatalf("error7 : %v \n", err)
 	}
+	fmt.Println("\n\nDebug\n\n")
 	for urlParsed := range ch1 {
 		if err := batch.Append(urlParsed.Url, urlParsed.Status, urlParsed.Length); err != nil {
 			log.Fatalf("error8 : %v \n", err)
@@ -127,6 +125,59 @@ func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
 	if err := batch.Send(); err != nil {
 		log.Fatalf("error9 : %v \n", err)
 	}
+}
+
+// batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
+//
+//	if err != nil {
+//		log.Fatalf("error7 : %v \n", err)
+//	}
+//
+//	for urlParsed := range ch1 {
+//		if err := batch.Append(urlParsed.Url, urlParsed.Status, urlParsed.Length); err != nil {
+//			log.Fatalf("error8 : %v \n", err)
+//		}
+//	}
+//
+//	if err := batch.Send(); err != nil {
+//		log.Fatalf("error9 : %v \n", err)
+//	}
+//
+// }
+func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
+
+	ct.DebugOutCh(ch1)
+
+	/*
+		conn, err := connect()
+		if err != nil {
+			log.Fatalf("err5 %v", err)
+		}
+
+		ctx := context.Background()
+
+		//rows, err := conn.Query(ctx, "CHECK_TABLE OutputTable")
+
+		err = conn.Exec(ctx,
+			"CREATE TABLE IF NOT EXISTS OutputTable(url String, status String,body_length Int)engine = MergeTree()order by status;")
+
+		if err != nil {
+			log.Fatalf("error6 : %v \n", err)
+		}
+
+		batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
+		if err != nil {
+			log.Fatalf("error7 : %v \n", err)
+		}
+		for urlParsed := range ch1 {
+			if err := batch.Append(urlParsed.Url, urlParsed.Status, urlParsed.Length); err != nil {
+				log.Fatalf("error8 : %v \n", err)
+			}
+		}
+		if err := batch.Send(); err != nil {
+			log.Fatalf("error9 : %v \n", err)
+		}
+	*/
 
 }
 
