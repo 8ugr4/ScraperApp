@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -90,8 +91,14 @@ func (r *Response) readFile(urlStrCh chan string) {
 		},
 	}
 	err := ct.readFromClick(urlStrCh)
+	for a := range urlStrCh {
+		fmt.Println(a)
+	}
 	if err != nil {
-		log.Fatalf("could not read a line from the file: %v", err)
+		log.Fatalf("could not read a line from the database: %v", err)
+	}
+	for a := range urlStrCh {
+		fmt.Println(a)
 	}
 	close(urlStrCh)
 }
@@ -118,6 +125,7 @@ func (r *Response) parseUrl(urlStr string) *Response {
 	} //new Response instance
 
 	httpResp, err := httpClient.Do(request)
+	fmt.Println("Problem string is : %v", httpResp)
 	if err != nil {
 		log.Fatalf("error when sending request to the server: %v", err)
 	}
@@ -144,6 +152,7 @@ func (r *Response) parseUrl(urlStr string) *Response {
 func (r *Response) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
 	defer wg.Done()
 	for urlStr := range urlStrCh {
+		fmt.Println("urlStr:%v", urlStr)
 		parseCh <- r.parseUrl(urlStr)
 	}
 
