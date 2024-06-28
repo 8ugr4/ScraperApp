@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
@@ -13,6 +12,8 @@ import (
 type scrape interface {
 	control()
 	transfer()
+	New()
+	Run(a int)
 }
 
 type URL struct {
@@ -25,55 +26,7 @@ type URL struct {
 	chOutputTablename string
 }
 
-func startScraping(files ...scrape) {
-	for _, file := range files {
-		file.control()
-		file.transfer()
-	}
-}
-
 //var workersCnt = runtime.NumCPU()
-
-func New(chHost, chUser, chPassword, chDatabasename, chInputTablename, chOutputTablename string) *URL {
-	return &URL{
-		chHost:            chHost,
-		chUser:            chUser,
-		chPassword:        chPassword,
-		chDatabasename:    chDatabasename,
-		chInputTablename:  chInputTablename,
-		chOutputTablename: chOutputTablename,
-	}
-}
-
-func (u *URL) Run(a int) { //method of obj Scrapper
-
-	defer func(start time.Time) {
-		log.Printf("it took %v to finish the Run()", time.Since(start))
-	}(time.Now())
-
-	log.Printf("using %d workers", a)
-
-	urlStrCh := make(chan string, a)   // urls channel
-	parseCh := make(chan *Response, a) // parsed channel
-
-	var workerWg sync.WaitGroup
-
-	// reads file from Database table and sends the inputs
-
-	go u.readFile(urlStrCh)
-
-	//into urlStrCh channel as it reads.
-	for workerId := 0; workerId < a; workerId++ {
-		workerWg.Add(1)
-		go u.httpWorker(workerId, &workerWg, urlStrCh, parseCh)
-	}
-
-	//reads from urlStrCh and sends data into writeIntoDatabase channel.
-	go u.writeIntoFile(parseCh, a)
-
-	workerWg.Wait()
-
-}
 
 type Response struct {
 	Status string
@@ -87,28 +40,64 @@ var (
 	}
 )
 
-// readFile reads the file from filePath, and while reading sends the url input to the urlFlowSender channel.
-func (u *URL) readFile(urlStrCh chan string) {
-	//implement reading from database on clickhouse
-	u.readFromClick(urlStrCh)
-	for sc.Scan() {
-		urlStr := sc.Text()
-		if urlStr == "" {
-			log.Fatalln("Error scanning input:", err)
-		} else if !strings.HasPrefix(urlStr, "https://") {
-			log.Printf("this input is not an URL:%v\t", urlStr)
-			//programi kapatmak yerine bir sonraki url checklemeye gecmesi gerekiyor.
-		}
-		urlStrCh <- urlStr
+func New(chHost, chUser, chPassword, chDatabasename, chInputTablename, chOutputTablename string) *URL {
+	return &URL{
+		chHost:            chHost,
+		chUser:            chUser,
+		chPassword:        chPassword,
+		chDatabasename:    chDatabasename,
+		chInputTablename:  chInputTablename,
+		chOutputTablename: chOutputTablename,
 	}
-	if err := sc.Err(); err != nil {
+}
+
+func (r *Response) Run(a int) { //method of obj Scrapper
+	defer func(start time.Time) {
+		log.Printf("it took %v to finish the Run()", time.Since(start))
+	}(time.Now())
+
+	log.Printf("using %d workers", a)
+
+	urlStrCh := make(chan string, a)   // urls channel
+	parseCh := make(chan *Response, a) // parsed channel
+
+	var workerWg sync.WaitGroup
+
+	// reads file from Database table and sends the inputs
+
+	go r.readFile(urlStrCh)
+
+	//into urlStrCh channel as it reads.
+	for workerId := 0; workerId < a; workerId++ {
+		workerWg.Add(1)
+		go r.httpWorker(&workerWg, urlStrCh, parseCh)
+	}
+
+	go func() {
+		workerWg.Wait()
+		close(parseCh)
+	}()
+	//reads from urlStrCh and sends data into writeIntoDatabase channel.
+	r.writeIntoFile(parseCh)
+}
+
+// readFile reads the file from filePath, and while reading sends the url input to the urlFlowSender channel.
+func (r *Response) readFile(urlStrCh chan string) {
+	//implement reading from database on clickhouse
+	ct := chTransfer{
+		URL: &URL{
+			chInputTablename: "urls_to_parse",
+		},
+	}
+	err := ct.readFromClick(urlStrCh)
+	if err != nil {
 		log.Fatalf("could not read a line from the file: %v", err)
 	}
 	close(urlStrCh)
 }
 
 // important. always close the channel if other functions also use it, but wait for it to finish.
-func (u *URL) parseUrl(urlStr string) *Response {
+func (r *Response) parseUrl(urlStr string) *Response {
 
 	defer func(start time.Time) {
 		log.Printf("scraping:%v\t,duration:%v", urlStr, time.Since(start))
@@ -152,10 +141,10 @@ func (u *URL) parseUrl(urlStr string) *Response {
 	return &resp
 }
 
-func (u *URL) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
+func (r *Response) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
 	defer wg.Done()
 	for urlStr := range urlStrCh {
-		parseCh <- u.parseUrl(urlStr)
+		parseCh <- r.parseUrl(urlStr)
 	}
 
 }
@@ -165,10 +154,19 @@ func (u *URL) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh cha
 
 func (r *Response) writeIntoFile(parseCh <-chan *Response) {
 	ch1 := make(chan *Response)
-	for urlStr := range parseCh {
-		ch1 <- urlStr
+	go func() {
+		for urlStr := range parseCh {
+			ch1 <- urlStr
+		}
+		close(ch1)
+	}()
+
+	ct := chTransfer{
+		URL: &URL{
+			chOutputTablename: "OutputTable",
+		},
 	}
-	r.writeIntoDatabase(ch1)
+	ct.writeIntoDatabase(ch1)
 	// then from here call the chTransfer function
 	// so that it'll writeIntoDatabase the given structure
 	// inside the clickhouse table.
@@ -176,59 +174,21 @@ func (r *Response) writeIntoFile(parseCh <-chan *Response) {
 
 // readFileWg := &sync.WaitGroup{}, use : readFileWg
 // var readFileWg sync.WaitGroup, use :  &readFileWg
-func main() {
-	newScrapper := dnsResolver{
-		files:     files{},
-		directory: Directory{},
-		chTransfer: chTransfer{URL: &URL{
-			chHost:            "chHost",
-			chUser:            "chUser",
-			chPassword:        "chPassword",
-			chDatabasename:    "chDatabasename",
-			chInputTablename:  "chInputTablename",
-			chOutputTablename: "chOutputTablename",
-		}},
-	}
-	startScraping(newScrapper)
-	workersCnt := 4
-	myScrapper := New(chHost, chUser, chPassword, chDatabasename, chInputTablename, chOutputTablename)
-	myScrapper.Run(workersCnt)
 
+func main() {
+	workersCnt := 4
+	//in := URL.fillIn()
+	sc := &Response{}
+	sc.Run(workersCnt)
 }
 
-//
-//func (s *Scrapper) writeIntoFile(parseCh <-chan *Response) {
-//	//"scrapedFile.csv" changed with newFilepath
-//	fp, err := os.Create(s.outputFile)
-//	if err != nil {
-//		log.Fatalln("Error creating file:", err)
-//	}
-//	defer func() {
-//		if err := fp.Close(); err != nil {
-//			log.Fatalln("Error closing file:", err)
-//		}
-//	}()
-//
-//	for resp := range parseCh {
-//		_, err := fmt.Fprintf(fp, "%v: %v: %v\n", resp.Status, resp.Url, resp.Length)
-//		if err != nil {
-//			log.Fatalln("Error writing Response:", err)
-//		} // todo check for the error
-//		if _, err := fp.Write([]byte(resp.Url)); err != nil {
-//			log.Fatalf("could not write into the file %v\n", err)
-//		}
-//	}
-//}
-//
-//func New(inputFile, outputFile string, workersCnt int) *Scrapper {
-//	if !strings.HasPrefix(inputFile, "C:/") || !strings.HasPrefix(outputFile, "C:/") {
-//		log.Fatalf("ERROR: Filepath must start with 'C:/'\ngiven paths are:"+
-//			"\ninputFilepath: %s\noutputFilepath: %s\n", inputFile, outputFile)
-//	}
-//
-//	return &Scrapper{
-//		inputFile:  inputFile,
-//		outputFile: outputFile,
-//		workersCnt: workersCnt,
+//func (u *URL) fillIn() *URL {
+//	return &URL{
+//		chHost:            "",
+//		chUser:            "",
+//		chPassword:        "",
+//		chDatabasename:    "",
+//		chInputTablename:  "",
+//		chOutputTablename: "",
 //	}
 //}
