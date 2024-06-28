@@ -125,7 +125,6 @@ func (r *Response) parseUrl(urlStr string) *Response {
 	} //new Response instance
 
 	httpResp, err := httpClient.Do(request)
-	fmt.Println("Problem string is : %v", httpResp)
 	if err != nil {
 		log.Fatalf("error when sending request to the server: %v", err)
 	}
@@ -152,7 +151,7 @@ func (r *Response) parseUrl(urlStr string) *Response {
 func (r *Response) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
 	defer wg.Done()
 	for urlStr := range urlStrCh {
-		fmt.Println("urlStr:%v", urlStr)
+		//fmt.Println("urlStr:%v", urlStr)
 		parseCh <- r.parseUrl(urlStr)
 	}
 
