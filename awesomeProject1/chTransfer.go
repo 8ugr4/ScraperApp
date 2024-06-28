@@ -12,23 +12,68 @@ type chTransfer struct {
 	*URL
 }
 
-func (ct *chTransfer) readFromClick(inChan chan string) error {
+func (ct *chTransfer) DebugInCh() {
 
 	conn, err := connect()
 	if err != nil {
-		log.Fatalf("err %v", err)
+		log.Fatal("connection error :%v \n", err)
 	}
+
 	ctx := context.Background()
+
+	err = conn.Exec(ctx,
+		"CREATE TABLE IF NOT EXISTS InputTable(url String)engine = MergeTree()order by status;")
+	if err != nil {
+		log.Fatalf("error12 : %v \n", err)
+	}
+	fmt.Println("End of Debug")
 
 	dataRows, err := conn.Query(ctx, "select url from InputTable")
 	if err != nil {
-		log.Fatalf("err: %v", err)
+		log.Fatalf("err13: %v", err)
+	}
+	for dataRows.Next() {
+		var url string
+		if err := dataRows.Scan(&url); err != nil {
+			log.Fatalf("err %v \n", err)
+		}
+		fmt.Println(url)
 	}
 
 	defer func(dataRows driver.Rows) {
 		err := dataRows.Close()
 		if err != nil {
-			log.Fatalf("err: %v", err)
+			log.Fatalf("err14: %v", err)
+		}
+	}(dataRows)
+
+	//batch, err := conn.PrepareBatch(ctx, "INSERT INTO InputTable(url) values ('https://www.benocs.com/careers/'),"+
+	//	"('https://drstearns.github.io/tutorials/gojson/'),;")
+	//if err != nil {
+	//	log.Fatalf("error7 : %v \n", err)
+	//}
+
+}
+
+func (ct *chTransfer) readFromClick(inChan chan string) error {
+
+	//ct.DebugCH()
+
+	conn, err := connect()
+	if err != nil {
+		log.Fatalf("err1 %v", err)
+	}
+	ctx := context.Background()
+
+	dataRows, err := conn.Query(ctx, "select url from InputTable")
+	if err != nil {
+		log.Fatalf("err2: %v", err)
+	}
+
+	defer func(dataRows driver.Rows) {
+		err := dataRows.Close()
+		if err != nil {
+			log.Fatalf("err3: %v", err)
 		}
 	}(dataRows)
 
@@ -36,20 +81,27 @@ func (ct *chTransfer) readFromClick(inChan chan string) error {
 	//2024/06/28 13:34:59 err: code: 62, message: Syntax error: failed at position 17 ('%'): %s. Expected one of: table, table function, subquery or list of joined tables, table or subquery or table function, element of expression with optional alias, SELECT subquery, function, function name, compound identifier, list of elements, identifier, string literal table identifier
 	//exit status 1
 
-	var url1 string
 	for dataRows.Next() {
-		if err1 := conn.Select(ctx, url1, "select url from InputTable"); err1 != nil {
-			log.Fatalf("err: %v", err1)
+		var url string
+		if err := dataRows.Scan(&url); err != nil {
+			log.Fatalf("err %v \n", err)
 		}
-		inChan <- url1
+		inChan <- url
 	}
+
+	defer func(dataRows driver.Rows) {
+		err := dataRows.Close()
+		if err != nil {
+			log.Fatalf("err14: %v", err)
+		}
+	}(dataRows)
 	return nil
 }
 
 func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
 	conn, err := connect()
 	if err != nil {
-		log.Fatalf("err %v", err)
+		log.Fatalf("err5 %v", err)
 	}
 
 	ctx := context.Background()
@@ -60,20 +112,20 @@ func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
 		"CREATE TABLE IF NOT EXISTS OutputTable(url String, status String,body_length Int)engine = MergeTree()order by status;")
 
 	if err != nil {
-		log.Fatalf("error : %v \n", err)
+		log.Fatalf("error6 : %v \n", err)
 	}
 
 	batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
 	if err != nil {
-		log.Fatalf("error : %v \n", err)
+		log.Fatalf("error7 : %v \n", err)
 	}
 	for urlParsed := range ch1 {
 		if err := batch.Append(urlParsed.Url, urlParsed.Status, urlParsed.Length); err != nil {
-			log.Fatalf("error : %v \n", err)
+			log.Fatalf("error8 : %v \n", err)
 		}
 	}
 	if err := batch.Send(); err != nil {
-		log.Fatalf("error : %v \n", err)
+		log.Fatalf("error9 : %v \n", err)
 	}
 
 }
@@ -97,7 +149,7 @@ func connect() (driver.Conn, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		log.Fatalf("err10: %v", err)
 	}
 
 	if err := conn.Ping(ctx); err != nil {
