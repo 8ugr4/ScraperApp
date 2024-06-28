@@ -6,47 +6,50 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"log"
-	"reflect"
 )
 
 type chTransfer struct {
 	*URL
-	*Response
 }
 
-func (r *Response) readFromClick(inChan chan string) {
+func (ct *chTransfer) readFromClick(inChan chan string) error {
 
 	conn, err := connect()
-	if err != nil { log.Fatalf("err",err) }
+	if err != nil {
+		log.Fatalf("err %v", err)
+	}
 	ctx := context.Background()
 
-	dataRows, err := conn.Query(ctx, "select url from u.chInputTablename")
-	if err != nil { log.Fatalf("err: %v", err) }
+	dataRows, err := conn.Query(ctx, "select url from InputTable")
+	if err != nil {
+		log.Fatalf("err: %v", err)
+	}
 
 	defer func(dataRows driver.Rows) {
 		err := dataRows.Close()
-		if err != nil { log.Fatalf("err: %v", err) }
+		if err != nil {
+			log.Fatalf("err: %v", err)
+		}
 	}(dataRows)
 
-	if hasRows := dataRows.Next(); hasRows {
-		inChan <- dataRows
-		for dataRows.Next() {
-			inChan <- dataRows.Columns()
+	// ("select url from %s", ct.chInputTablename) query gave errors. as following:
+	//2024/06/28 13:34:59 err: code: 62, message: Syntax error: failed at position 17 ('%'): %s. Expected one of: table, table function, subquery or list of joined tables, table or subquery or table function, element of expression with optional alias, SELECT subquery, function, function name, compound identifier, list of elements, identifier, string literal table identifier
+	//exit status 1
 
-
-			inChan <- Response{Url: url1,}
-			}
-
+	var url1 string
+	for dataRows.Next() {
+		if err1 := conn.Select(ctx, url1, "select url from InputTable"); err1 != nil {
+			log.Fatalf("err: %v", err1)
 		}
+		inChan <- url1
 	}
-
-} else { log.Println("No more rows.") }
+	return nil
 }
 
-func (r *Response) writeIntoDatabase(ch1 chan *Response) {
+func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
 	conn, err := connect()
 	if err != nil {
-		panic((err))
+		log.Fatalf("err %v", err)
 	}
 
 	ctx := context.Background()
@@ -54,22 +57,25 @@ func (r *Response) writeIntoDatabase(ch1 chan *Response) {
 	//rows, err := conn.Query(ctx, "CHECK_TABLE OutputTable")
 
 	err = conn.Exec(ctx,
-		"CREATE TABLE IF NOT EXISTS OutputTable ("+
-			"url String,"+
-			"status String,"+
-			"body_length Int"+
-			"engine = MergeTree()order by id;")
+		"CREATE TABLE IF NOT EXISTS OutputTable(url String, status String,body_length Int)engine = MergeTree()order by status;")
 
-		if err != nil { log.Fatalf("error : %v \n", err) }
-
-	for range ch1 {
-		urlParsed := <-ch1
-
-		query, err1 := conn.Query(ctx, "insert into url_table("+
-			"url,status,length)", urlParsed)
-
-		if err1 != nil { log.Fatalf(" query:%v\n error:%v\n", query, err1) }
+	if err != nil {
+		log.Fatalf("error : %v \n", err)
 	}
+
+	batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
+	if err != nil {
+		log.Fatalf("error : %v \n", err)
+	}
+	for urlParsed := range ch1 {
+		if err := batch.Append(urlParsed.Url, urlParsed.Status, urlParsed.Length); err != nil {
+			log.Fatalf("error : %v \n", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		log.Fatalf("error : %v \n", err)
+	}
+
 }
 
 func connect() (driver.Conn, error) {
