@@ -6,68 +6,69 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"log"
+	"reflect"
 )
 
 type chTransfer struct {
 	*URL
+	*Response
 }
 
-func transfer(ch1 chan string, url *URL) {
+func (r *Response) readFromClick(inChan chan string) {
+
+	conn, err := connect()
+	if err != nil { log.Fatalf("err",err) }
+	ctx := context.Background()
+
+	dataRows, err := conn.Query(ctx, "select url from u.chInputTablename")
+	if err != nil { log.Fatalf("err: %v", err) }
+
+	defer func(dataRows driver.Rows) {
+		err := dataRows.Close()
+		if err != nil { log.Fatalf("err: %v", err) }
+	}(dataRows)
+
+	if hasRows := dataRows.Next(); hasRows {
+		inChan <- dataRows
+		for dataRows.Next() {
+			inChan <- dataRows.Columns()
+
+
+			inChan <- Response{Url: url1,}
+			}
+
+		}
+	}
+
+} else { log.Println("No more rows.") }
+}
+
+func (r *Response) writeIntoDatabase(ch1 chan *Response) {
 	conn, err := connect()
 	if err != nil {
 		panic((err))
 	}
 
 	ctx := context.Background()
-	rows, err := conn.Query(ctx, "CHECK_TABLE URL_table")
-	if err != nil {
-		log.Fatalf("error : %v \n", err)
-	}
-	for rows.Next() {
-		var result string
-		var binary int
-		if err := rows.Scan(&result, &binary); err != nil {
-			log.Fatal(err)
-		}
 
-		if binary != 1 {
-			rows, err := conn.Query(ctx, "create table URL_table("+
-				"chHost String,"+
-				"chUser String,"+
-				"chPassword String,"+
-				"chDatabasename String,"+
-				"chInputTablename String,)"+
-				"chOutputTablename String,"+
-				"engine = MergeTree()order by id;")
-			if err != nil {
-				log.Fatalf(" rows:%v\n error:%v\n", rows, err)
-			}
-		}
-	}
+	//rows, err := conn.Query(ctx, "CHECK_TABLE OutputTable")
+
+	err = conn.Exec(ctx,
+		"CREATE TABLE IF NOT EXISTS OutputTable ("+
+			"url String,"+
+			"status String,"+
+			"body_length Int"+
+			"engine = MergeTree()order by id;")
+
+		if err != nil { log.Fatalf("error : %v \n", err) }
+
 	for range ch1 {
 		urlParsed := <-ch1
+
 		query, err1 := conn.Query(ctx, "insert into url_table("+
-			"chHost, chUser, chPassword, chDatabasename, chInputTablename, chOutputTablename)", urlParsed)
-		if err != nil {
-			log.Fatalf(" query:%v\n error:%v\n", query, err1)
-		}
+			"url,status,length)", urlParsed)
 
-	}
-
-	//conn.Query(ctx, "insert into my_table(id, name)\nvalues (1, '123');\ninsert into my_table(name, id)\nvalues ('abc', 2);\n")
-	//conn.Query(ctx, "select *\nfrom my_table\nwhere id = 2;\nselect name, id\nfrom my_table;\n")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for rows.Next() {
-		var name, uuid string
-
-		if err := rows.Scan(&name, &uuid); err != nil {
-			log.Fatal(err)
-		}
-
-		log.Printf("name: %s, uuid: %s", name, uuid)
+		if err1 != nil { log.Fatalf(" query:%v\n error:%v\n", query, err1) }
 	}
 }
 
