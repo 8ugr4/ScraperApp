@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,13 +14,9 @@ type scrape interface {
 	control()
 	transfer()
 }
-type Scrapper struct {
-	inputFile  string
-	outputFile string
-	workersCnt int
-}
 
 type URL struct {
+	url,
 	chHost,
 	chUser,
 	chPassword,
@@ -34,6 +28,7 @@ type URL struct {
 func startScraping(files ...scrape) {
 	for _, file := range files {
 		file.control()
+		file.transfer()
 	}
 }
 
@@ -50,7 +45,7 @@ func New(chHost, chUser, chPassword, chDatabasename, chInputTablename, chOutputT
 	}
 }
 
-func (s *Scrapper) Run(a int) { //method of obj Scrapper
+func (u *URL) Run(a int) { //method of obj Scrapper
 
 	defer func(start time.Time) {
 		log.Printf("it took %v to finish the Run()", time.Since(start))
@@ -59,28 +54,28 @@ func (s *Scrapper) Run(a int) { //method of obj Scrapper
 	log.Printf("using %d workers", a)
 
 	urlStrCh := make(chan string, a)   // urls channel
-	parseCh := make(chan *response, a) // parsed channel
+	parseCh := make(chan *Response, a) // parsed channel
 
 	var workerWg sync.WaitGroup
 
 	// reads file from Database table and sends the inputs
 
-	go s.readFile(urlStrCh)
+	go u.readFile(urlStrCh)
 
 	//into urlStrCh channel as it reads.
 	for workerId := 0; workerId < a; workerId++ {
 		workerWg.Add(1)
-		go s.httpWorker(workerId, &workerWg, urlStrCh, parseCh)
+		go u.httpWorker(workerId, &workerWg, urlStrCh, parseCh)
 	}
 
-	//reads from urlStrCh and sends data into transfer channel.
-	go s.writeIntoFile(parseCh, a)
+	//reads from urlStrCh and sends data into writeIntoDatabase channel.
+	go u.writeIntoFile(parseCh, a)
 
 	workerWg.Wait()
 
 }
 
-type response struct {
+type Response struct {
 	Status string
 	Url    string
 	Length int64
@@ -93,20 +88,9 @@ var (
 )
 
 // readFile reads the file from filePath, and while reading sends the url input to the urlFlowSender channel.
-func (s *Scrapper) readFile(urlStrCh chan<- string) {
+func (u *URL) readFile(urlStrCh chan string) {
 	//implement reading from database on clickhouse
-	inputFp, err := os.Open(s.inputFile) //inputFilePointer
-	if err != nil {
-		log.Fatalln("Error opening file:", err)
-	}
-	defer func() {
-		err := inputFp.Close()
-		if err != nil {
-			log.Fatalln("Error closing file:", err)
-		}
-	}()
-
-	sc := bufio.NewScanner(inputFp)
+	u.readFromClick(urlStrCh)
 	for sc.Scan() {
 		urlStr := sc.Text()
 		if urlStr == "" {
@@ -124,10 +108,10 @@ func (s *Scrapper) readFile(urlStrCh chan<- string) {
 }
 
 // important. always close the channel if other functions also use it, but wait for it to finish.
-func (s *Scrapper) parseUrl(workerId int, urlStr string) *response {
+func (u *URL) parseUrl(urlStr string) *Response {
 
 	defer func(start time.Time) {
-		log.Printf("worker:%d\tscraping:%v\t,duration:%v", workerId, urlStr, time.Since(start))
+		log.Printf("scraping:%v\t,duration:%v", urlStr, time.Since(start))
 		//log.Printf("usedWorkerCnt in Total is:%d", cnt)
 	}(time.Now())
 
@@ -140,9 +124,9 @@ func (s *Scrapper) parseUrl(workerId int, urlStr string) *response {
 	if err != nil {
 		log.Fatalln("Error parsing URL:", err)
 	}
-	resp := response{
+	resp := Response{
 		Url: urlStr,
-	} //new response instance
+	} //new Response instance
 
 	httpResp, err := httpClient.Do(request)
 	if err != nil {
@@ -151,7 +135,7 @@ func (s *Scrapper) parseUrl(workerId int, urlStr string) *response {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Fatalln("Error closing response body:", err)
+			log.Fatalln("Error closing Response body:", err)
 		}
 	}(httpResp.Body)
 
@@ -160,7 +144,7 @@ func (s *Scrapper) parseUrl(workerId int, urlStr string) *response {
 		body, err := io.ReadAll(httpResp.Body)
 		resp.Length = int64(len(body))
 		if err != nil {
-			log.Fatalln("Error reading response body:", err)
+			log.Fatalln("Error reading Response body:", err)
 		}
 	} else {
 		resp.Length = httpResp.ContentLength
@@ -168,10 +152,10 @@ func (s *Scrapper) parseUrl(workerId int, urlStr string) *response {
 	return &resp
 }
 
-func (s *Scrapper) httpWorker(workerId int, wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *response) {
+func (u *URL) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
 	defer wg.Done()
 	for urlStr := range urlStrCh {
-		parseCh <- s.parseUrl(workerId, urlStr)
+		parseCh <- u.parseUrl(urlStr)
 	}
 
 }
@@ -179,26 +163,14 @@ func (s *Scrapper) httpWorker(workerId int, wg *sync.WaitGroup, urlStrCh <-chan 
 // writeIntoFile writes the parsed Input(URL) to a file.
 // reads from parsedFlowReceiver puts the inputs into a .csv file.
 
-func (u *URL) writeIntoFile(parseCh <-chan *response, a int) {
-	// gonna convert response struct to the URL struct.
-	transferCh := make(chan struct{}, a)
-
-	// turn this for loop into an anonymous go routine,
-	// so while it's putting the info inside here
-	// it can also read from it.
-	for resp := range parseCh {
-		URL{
-			chHost:            resp.Url, // convert resp to include all of these
-			chUser:            resp.Url, // until implementing that just keep it like this.
-			chPassword:        resp.Url,
-			chDatabasename:    resp.Url,
-			chInputTablename:  resp.Url,
-			chOutputTablename: resp.Url,
-		}
+func (r *Response) writeIntoFile(parseCh <-chan *Response) {
+	ch1 := make(chan *Response)
+	for urlStr := range parseCh {
+		ch1 <- urlStr
 	}
-	transfer(transferCh, &URL)
+	r.writeIntoDatabase(ch1)
 	// then from here call the chTransfer function
-	// so that it'll transfer the given structure
+	// so that it'll writeIntoDatabase the given structure
 	// inside the clickhouse table.
 }
 
@@ -208,7 +180,7 @@ func main() {
 	newScrapper := dnsResolver{
 		files:     files{},
 		directory: Directory{},
-		chTransfer: chTransfer{&URL{
+		chTransfer: chTransfer{URL: &URL{
 			chHost:            "chHost",
 			chUser:            "chUser",
 			chPassword:        "chPassword",
@@ -225,7 +197,7 @@ func main() {
 }
 
 //
-//func (s *Scrapper) writeIntoFile(parseCh <-chan *response) {
+//func (s *Scrapper) writeIntoFile(parseCh <-chan *Response) {
 //	//"scrapedFile.csv" changed with newFilepath
 //	fp, err := os.Create(s.outputFile)
 //	if err != nil {
@@ -240,7 +212,7 @@ func main() {
 //	for resp := range parseCh {
 //		_, err := fmt.Fprintf(fp, "%v: %v: %v\n", resp.Status, resp.Url, resp.Length)
 //		if err != nil {
-//			log.Fatalln("Error writing response:", err)
+//			log.Fatalln("Error writing Response:", err)
 //		} // todo check for the error
 //		if _, err := fp.Write([]byte(resp.Url)); err != nil {
 //			log.Fatalf("could not write into the file %v\n", err)
