@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"io"
 	"log"
 	"net/http"
@@ -9,13 +10,6 @@ import (
 	"sync"
 	"time"
 )
-
-type scrape interface {
-	control()
-	transfer()
-	New()
-	Run(a int)
-}
 
 type URL struct {
 	url,
@@ -52,24 +46,24 @@ func New(chHost, chUser, chPassword, chDatabasename, chInputTablename, chOutputT
 	}
 }
 
-func (r *Response) Run(a int) { //method of obj Scrapper
+func (r *Response) Run(conn driver.Conn, workersCnt int) { //method of obj Scrapper
 	defer func(start time.Time) {
 		log.Printf("it took %v to finish the Run()", time.Since(start))
 	}(time.Now())
 
-	log.Printf("using %d workers", a)
+	log.Printf("using %d workers", workersCnt)
 
-	urlStrCh := make(chan string, a)   // urls channel
-	parseCh := make(chan *Response, a) // parsed channel
+	urlStrCh := make(chan string, workersCnt)   // urls channel
+	parseCh := make(chan *Response, workersCnt) // parsed channel
 
 	var workerWg sync.WaitGroup
 
 	// reads file from Database table and sends the inputs
 
-	go r.readFile(urlStrCh)
+	go r.readFile(conn, urlStrCh)
 
 	//into urlStrCh channel as it reads.
-	for workerId := 0; workerId < a; workerId++ {
+	for workerId := 0; workerId < workersCnt; workerId++ {
 		workerWg.Add(1)
 		go r.httpWorker(&workerWg, urlStrCh, parseCh)
 	}
@@ -79,31 +73,30 @@ func (r *Response) Run(a int) { //method of obj Scrapper
 		close(parseCh)
 	}()
 	//reads from urlStrCh and sends data into writeIntoDatabase channel.
-	r.writeIntoFile(parseCh)
+	r.writeIntoFile(conn, parseCh)
 }
 
 // readFile reads the file from filePath, and while reading sends the url input to the urlFlowSender channel.
-func (r *Response) readFile(urlStrCh chan string) {
+func (r *Response) readFile(conn driver.Conn, urlStrCh chan string) {
 	//implement reading from database on clickhouse
+
 	ct := chTransfer{
 		URL: &URL{
 			chInputTablename: "urls_to_parse",
 		},
 	}
-	err := ct.readFromClick(urlStrCh)
-	for a := range urlStrCh {
-		fmt.Println(a)
-	}
+	err := ct.readFromClick(conn, urlStrCh)
 	if err != nil {
 		log.Fatalf("could not read a line from the database: %v", err)
 	}
+
 	for a := range urlStrCh {
 		fmt.Println(a)
 	}
+
 	close(urlStrCh)
 }
 
-// important. always close the channel if other functions also use it, but wait for it to finish.
 func (r *Response) parseUrl(urlStr string) *Response {
 
 	defer func(start time.Time) {
@@ -160,7 +153,7 @@ func (r *Response) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseC
 // writeIntoFile writes the parsed Input(URL) to a file.
 // reads from parsedFlowReceiver puts the inputs into a .csv file.
 
-func (r *Response) writeIntoFile(parseCh <-chan *Response) {
+func (r *Response) writeIntoFile(conn driver.Conn, parseCh <-chan *Response) {
 	ch1 := make(chan *Response)
 	go func() {
 		for urlStr := range parseCh {
@@ -174,7 +167,7 @@ func (r *Response) writeIntoFile(parseCh <-chan *Response) {
 			chOutputTablename: "OutputTable",
 		},
 	}
-	ct.writeIntoDatabase(ch1)
+	ct.writeIntoDatabase(conn, ch1)
 	// then from here call the chTransfer function
 	// so that it'll writeIntoDatabase the given structure
 	// inside the clickhouse table.
@@ -187,7 +180,11 @@ func main() {
 	workersCnt := 4
 	//in := URL.fillIn()
 	sc := &Response{}
-	sc.Run(workersCnt)
+	conn, err := connect()
+	if err != nil {
+		log.Fatalln("Error connecting to database:", err)
+	}
+	sc.Run(conn, workersCnt)
 }
 
 //func (u *URL) fillIn() *URL {
