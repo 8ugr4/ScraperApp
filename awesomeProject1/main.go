@@ -12,12 +12,12 @@ import (
 )
 
 type URL struct {
-	url,
-	chHost,
-	chUser,
-	chPassword,
-	chDatabasename,
-	chInputTablename,
+	url               string
+	chHost            string
+	chUser            string
+	chPassword        string
+	chDatabasename    string
+	chInputTablename  string
 	chOutputTablename string
 }
 
@@ -72,7 +72,7 @@ func (r *Response) Run(conn driver.Conn, workersCnt int) { //method of obj Scrap
 		workerWg.Wait()
 		close(parseCh)
 	}()
-	//reads from urlStrCh and sends data into writeIntoDatabase channel.
+	//reads from urlStrCh and sends data into writeIntoCh channel.
 	r.writeIntoFile(conn, parseCh)
 }
 
@@ -85,7 +85,7 @@ func (r *Response) readFile(conn driver.Conn, urlStrCh chan string) {
 			chInputTablename: "urls_to_parse",
 		},
 	}
-	err := ct.readFromClick(conn, urlStrCh)
+	err := ct.readFromCh(conn, urlStrCh)
 	if err != nil {
 		log.Fatalf("could not read a line from the database: %v", err)
 	}
@@ -167,9 +167,12 @@ func (r *Response) writeIntoFile(conn driver.Conn, parseCh <-chan *Response) {
 			chOutputTablename: "OutputTable",
 		},
 	}
-	ct.writeIntoDatabase(conn, ch1)
+	err := ct.writeIntoCh(conn, ch1)
+	if err != nil {
+		fmt.Printf("couldn't connect to the database :%q\n", err)
+	}
 	// then from here call the chTransfer function
-	// so that it'll writeIntoDatabase the given structure
+	// so that it'll writeIntoCh the given structure
 	// inside the clickhouse table.
 }
 
@@ -186,14 +189,3 @@ func main() {
 	}
 	sc.Run(conn, workersCnt)
 }
-
-//func (u *URL) fillIn() *URL {
-//	return &URL{
-//		chHost:            "",
-//		chUser:            "",
-//		chPassword:        "",
-//		chDatabasename:    "",
-//		chInputTablename:  "",
-//		chOutputTablename: "",
-//	}
-//}
