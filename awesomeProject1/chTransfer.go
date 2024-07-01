@@ -2,129 +2,99 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"log"
 )
 
+// using distinct will unique the column data
+
+const (
+	inputTableCreateSQLQuery  = "CREATE TABLE IF NOT EXISTS InputTable(url String)engine = MergeTree()order by url"
+	selectColumnSQLQuery      = "select distinct url from InputTable"
+	outputTableSQLQuery       = "CREATE TABLE IF NOT EXISTS OutputTable(url String, status String,body_length Int)engine = MergeTree()order by status;"
+	insertOutputTableSQLQuery = "INSERT INTO OutputTable (url, status, body_length)"
+)
+
 type chTransfer struct {
 	*URL
 }
 
-func (ct *chTransfer) DebugInCh() {
-
-	conn, err := connect()
-	if err != nil {
-		log.Fatal("connection error :%v \n", err)
-	}
+func (ct *chTransfer) DebugInCh(conn driver.Conn) error {
 
 	ctx := context.Background()
 
-	err = conn.Exec(ctx,
-		"CREATE TABLE IF NOT EXISTS InputTable(url String)engine = MergeTree()order by status;")
+	err := conn.Exec(ctx, fmt.Sprintf("%s", inputTableCreateSQLQuery))
 	if err != nil {
-		log.Fatalf("error12 : %v \n", err)
+		return fmt.Errorf("couldn't create table : %q \n", err)
 	}
-	fmt.Println("End of Debug")
+	fmt.Println("end of Debug")
 
-	dataRows, err := conn.Query(ctx, "select url from InputTable")
+	rows, err := conn.Query(ctx, fmt.Sprintf("%s", selectColumnSQLQuery))
 	if err != nil {
-		log.Fatalf("err13: %v", err)
+		return fmt.Errorf("couldn't select from table: %q", err)
 	}
-	for dataRows.Next() {
+	defer rows.Close()
+
+	for rows.Next() {
 		var url string
-		if err := dataRows.Scan(&url); err != nil {
-			log.Fatalf("err %v \n", err)
+		if err := rows.Scan(&url); err != nil {
+			return fmt.Errorf("couldn't scan from table %q \n", err)
 		}
-		fmt.Println(url)
+		fmt.Printf("url : %v\n", url)
 	}
-
-	defer func(dataRows driver.Rows) {
-		err := dataRows.Close()
-		if err != nil {
-			log.Fatalf("err14: %v", err)
-		}
-	}(dataRows)
-
-	//batch, err := conn.PrepareBatch(ctx, "INSERT INTO InputTable(url) values ('https://www.benocs.com/careers/'),"+
-	//	"('https://drstearns.github.io/tutorials/gojson/'),;")
-	//if err != nil {
-	//	log.Fatalf("error7 : %v \n", err)
-	//}
-
+	return nil
 }
 
-func (ct *chTransfer) readFromClick(inChan chan string) error {
+func (ct *chTransfer) readFromClick(conn driver.Conn, inChan chan string) error {
 
-	//ct.DebugCH()
-
-	conn, err := connect()
-	if err != nil {
-		log.Fatalf("err1 %v", err)
-	}
 	ctx := context.Background()
 
-	dataRows, err := conn.Query(ctx, "select url from InputTable")
+	rows, err := conn.Query(ctx, fmt.Sprintf("%s", selectColumnSQLQuery))
 	if err != nil {
-		log.Fatalf("err2: %v", err)
+		return fmt.Errorf("couldn't select from table: %q", err)
 	}
+	defer rows.Close()
 
-	defer func(dataRows driver.Rows) {
-		err := dataRows.Close()
-		if err != nil {
-			log.Fatalf("err3: %v", err)
-		}
-	}(dataRows)
-
-	// ("select url from %s", ct.chInputTablename) query gave errors. as following:
-	//2024/06/28 13:34:59 err: code: 62, message: Syntax error: failed at position 17 ('%'): %s. Expected one of: table, table function, subquery or list of joined tables, table or subquery or table function, element of expression with optional alias, SELECT subquery, function, function name, compound identifier, list of elements, identifier, string literal table identifier
-	//exit status 1
-
-	for dataRows.Next() {
+	for rows.Next() {
 		var url string
-		if err := dataRows.Scan(&url); err != nil {
+		if err := rows.Scan(&url); err != nil {
 			log.Fatalf("err %v \n", err)
 		}
 		inChan <- url
 	}
 
-	defer func(dataRows driver.Rows) {
-		err := dataRows.Close()
-		if err != nil {
-			log.Fatalf("err14: %v", err)
-		}
-	}(dataRows)
 	return nil
 }
 
-func (ct *chTransfer) DebugOutCh(ch1 chan *Response) {
-	conn, err := connect()
-	if err != nil {
-		log.Fatal("connection error :%v \n", err)
-	}
+func (ct *chTransfer) DebugOutCh(conn driver.Conn, ch1 chan *Response) error {
 
 	ctx := context.Background()
 
-	err = conn.Exec(ctx,
-		"CREATE TABLE IF NOT EXISTS OutputTable(url String, status String,body_length Int)engine = MergeTree()order by status;")
+	err := conn.Exec(ctx, fmt.Sprintf("%s", outputTableSQLQuery))
 	if err != nil {
-		log.Fatalf("error12 : %v \n", err)
+		return fmt.Errorf("couldn't create table: %q \n", err)
 	}
 
-	batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
+	batch, err := conn.PrepareBatch(ctx, fmt.Sprintf("%s", insertOutputTableSQLQuery))
 	if err != nil {
-		log.Fatalf("error7 : %v \n", err)
+		return fmt.Errorf("couldn't insert the data into the output_table : %q \n", err)
 	}
-	fmt.Println("\n\nDebug\n\n")
+
+	fmt.Println("\nDebug")
+
 	for urlParsed := range ch1 {
+		fmt.Printf("urlParsed.Url:%v\n", urlParsed.Url)
 		if err := batch.Append(urlParsed.Url, urlParsed.Status, urlParsed.Length); err != nil {
-			log.Fatalf("error8 : %v \n", err)
+			return fmt.Errorf("couldn't append into the table /batch : %q \n", err)
 		}
 	}
 	if err := batch.Send(); err != nil {
-		log.Fatalf("error9 : %v \n", err)
+		return fmt.Errorf("couldn't send the data /batch : %q \n", err)
 	}
+	return nil
 }
 
 // batch, err := conn.PrepareBatch(ctx, "INSERT INTO OutputTable (url, status, body_length)")
@@ -144,9 +114,12 @@ func (ct *chTransfer) DebugOutCh(ch1 chan *Response) {
 //	}
 //
 // }
-func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
+func (ct *chTransfer) writeIntoDatabase(conn driver.Conn, ch1 chan *Response) error {
 
-	ct.DebugOutCh(ch1)
+	err := ct.DebugOutCh(conn, ch1)
+	if err != nil {
+		return fmt.Errorf("couldn't call DebugOutCh function.\n")
+	}
 
 	/*
 		conn, err := connect()
@@ -178,7 +151,7 @@ func (ct *chTransfer) writeIntoDatabase(ch1 chan *Response) {
 			log.Fatalf("error9 : %v \n", err)
 		}
 	*/
-
+	return nil
 }
 
 func connect() (driver.Conn, error) {
@@ -204,7 +177,8 @@ func connect() (driver.Conn, error) {
 	}
 
 	if err := conn.Ping(ctx); err != nil {
-		if exception, ok := err.(*clickhouse.Exception); ok {
+		var exception *clickhouse.Exception
+		if errors.As(err, &exception) {
 			fmt.Printf("Exception [%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
 		}
 		return nil, err
