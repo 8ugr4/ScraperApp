@@ -48,7 +48,7 @@ func (ct *chTransfer) DebugInCh(conn driver.Conn) error {
 	return nil
 }
 
-func (ct *chTransfer) readFromClick(conn driver.Conn, inChan chan string) error {
+func (ct *chTransfer) readFromCh(conn driver.Conn, inChan chan string) error {
 
 	ctx := context.Background()
 
@@ -61,7 +61,7 @@ func (ct *chTransfer) readFromClick(conn driver.Conn, inChan chan string) error 
 	for rows.Next() {
 		var url string
 		if err := rows.Scan(&url); err != nil {
-			log.Fatalf("err %v \n", err)
+			log.Fatalf("couldn't scan the rows :%v \n", err)
 		}
 		inChan <- url
 	}
@@ -114,7 +114,7 @@ func (ct *chTransfer) DebugOutCh(conn driver.Conn, ch1 chan *Response) error {
 //	}
 //
 // }
-func (ct *chTransfer) writeIntoDatabase(conn driver.Conn, ch1 chan *Response) error {
+func (ct *chTransfer) writeIntoCh(conn driver.Conn, ch1 chan *Response) error {
 
 	err := ct.DebugOutCh(conn, ch1)
 	if err != nil {
@@ -173,7 +173,7 @@ func connect() (driver.Conn, error) {
 	})
 
 	if err != nil {
-		log.Fatalf("err10: %v", err)
+		log.Fatalf("couldn't connect to the ClickHouse: %v", err)
 	}
 
 	if err := conn.Ping(ctx); err != nil {
