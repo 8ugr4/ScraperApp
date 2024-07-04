@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 )
@@ -26,8 +25,6 @@ type URL struct {
 	countOfUrl        int
 }
 
-//var workersCnt = runtime.NumCPU()
-
 type Response struct {
 	Status string
 	Url    string
@@ -39,6 +36,8 @@ var (
 		Timeout: 30 * time.Second,
 	}
 )
+
+// as default, chHost:localhost, chPort:9000 ... as follows.
 
 func New(chHost, chPort, chUser, chPassword, chDatabasename, chInputTablename, chOutputTablename string) *URL {
 	return &URL{
@@ -52,16 +51,12 @@ func New(chHost, chPort, chUser, chPassword, chDatabasename, chInputTablename, c
 	}
 }
 
-func (u *URL) CheckHostPort() {
-	fmt.Printf("url_host:%q\turl_port:%q\n", u.chHost, u.chPort)
-}
+// connects chTransfer functions to main file.
+// calls the necessary functions to read from given InputTableName (Ch),
+// parses them, writes them into given OutputTableName into Clickhouse.
 
-//func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) {
-//	(*Response).Run1(wg, conn, workersCnt)
-//
-//}
+func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) {
 
-func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) { //method of obj Scrapper
 	ct := chTransfer{
 		URL: &URL{
 			chInputTablename:  "urls_to_parse",
@@ -70,24 +65,22 @@ func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) { //meth
 			chOutputTablename: "OutputTable",
 		},
 	}
-	u.countOfUrl = ct.CountURLinCh(conn)
 
-	fmt.Printf("there are %d urls.\n", u.countOfUrl)
+	// takes the row count of the InputTable.
+
+	u.countOfUrl = ct.CountRows(conn)
+
+	fmt.Printf("there are %d urls and %d workers\n", u.countOfUrl, workersCnt)
 
 	defer func(start time.Time) {
-		log.Printf("it took %v to finish the Run()", time.Since(start))
+		fmt.Printf("it took %v to finish the Run()", time.Since(start))
 	}(time.Now())
 
-	log.Printf("using %d workers", workersCnt)
+	// URL channel.
+	urlStrCh := make(chan string, workersCnt)
+	// Parsed URL channel.
+	parseCh := make(chan *Response, u.countOfUrl)
 
-	urlStrCh := make(chan string, workersCnt)     // urls channel
-	parseCh := make(chan *Response, u.countOfUrl) // parsed channel
-	// reads file from Database table and sends the inputs
-	//into urlStrCh channel as it reads.
-	if conn == nil {
-		fmt.Println("conn is nil")
-		os.Exit(1)
-	}
 	go u.readFile(conn, urlStrCh)
 
 	for workerId := 0; workerId < workersCnt; workerId++ {
@@ -95,26 +88,12 @@ func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) { //meth
 		go u.httpWorker(wg, urlStrCh, parseCh)
 	}
 
-	go func() {
-		wg.Add(1)
-		wg.Wait()
-	}()
-	//reads from urlStrCh and sends data into writeIntoCh channel.
-	fmt.Println("before sending data to writeIntoFile function.")
-
 	u.writeIntoFile(wg, conn, parseCh, u.countOfUrl)
 
-	fmt.Println("\nafter sending data to writeIntoFile function.")
-	//defer close(parseCh)
 	defer wg.Done()
-	//defer close(parseCh)
-	//defer close(urlStrCh)
-	fmt.Printf("probably it lies here....\n")
 }
 
-// readFile reads the file from filePath, and while reading sends the url input to the urlFlowSender channel.
 func (u *URL) readFile(conn driver.Conn, urlStrCh chan string) {
-	//implement reading from database on clickhouse
 
 	ct := chTransfer{
 		URL: &URL{
@@ -124,12 +103,15 @@ func (u *URL) readFile(conn driver.Conn, urlStrCh chan string) {
 			chOutputTablename: "OutputTable",
 		},
 	}
+
 	err := ct.readFromCh(conn, urlStrCh)
 	if err != nil {
 		log.Fatalf("could not read a line from the database: %v", err)
 	}
 
 }
+
+// Parses URL's ( at the moment : status, length)
 
 func (u *URL) parseUrl(urlStr string) *Response {
 
@@ -175,28 +157,30 @@ func (u *URL) parseUrl(urlStr string) *Response {
 	return &resp
 }
 
+// reads from UrlStrChannel, sends the URL's to be parsed.
+
 func (u *URL) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
 	defer wg.Done()
 	for urlStr := range urlStrCh {
-		//fmt.Println("urlStr:%v", urlStr)
 		parseCh <- u.parseUrl(urlStr)
-		//fmt.Printf("%q\n", urlStr) //control for the urls
+
 	}
 
 }
 
-// writeIntoFile writes the parsed Input(URL) to a file.
-// reads from parsedFlowReceiver puts the inputs into a .csv file.
+// writeIntoFile sends the URL's to ch.WriteIntoCh
+// reads from parseChannel (urls)
 
 func (u *URL) writeIntoFile(wg *sync.WaitGroup, conn driver.Conn, parseCh <-chan *Response, count int) {
+
+	// channel to send Parsed URL's as a struct. (see : Response )
 	ch1 := make(chan *Response)
-	//defer close(ch1)
+
 	go func() {
 		for urlStr := range parseCh {
 			ch1 <- urlStr
 		}
 	}()
-	//defer close(ch1)
 
 	ct := chTransfer{
 		URL: &URL{
@@ -205,38 +189,34 @@ func (u *URL) writeIntoFile(wg *sync.WaitGroup, conn driver.Conn, parseCh <-chan
 			chOutputTablename: "OutputTable",
 		},
 	}
+
 	err := ct.writeIntoCh(wg, conn, ch1, count)
+
 	if err != nil {
 		fmt.Printf("couldn't connect to the database :%q\n", err)
-	} else {
-		//fmt.Println("write into ch ended successfully.")
 	}
-	// then from here call the chTransfer function
-	// so that it'll writeIntoCh the given structure
-	// inside the clickhouse table.
 }
 
-// readFileWg := &sync.WaitGroup{}, use : readFileWg
-// var readFileWg sync.WaitGroup, use :  &readFileWg
-
 func main() {
+
 	workersCnt := 4
 	var wg sync.WaitGroup
 	var conn driver.Conn
 
 	sc1 := New("localhost", "9000", "default", "", "chDatabasename", "urls_to_parse", "url_parse_results")
-	//fmt.Printf("sc1_host:%q\tsc1_port:%q\n", sc1.chHost, sc1.chPort)
-	conn, err := sc1.connect()
-	fmt.Printf("%q\n", err)
 
-	//func1.CheckHostPort(sc1)
+	conn, err := sc1.connect()
+	if err != nil {
+		fmt.Printf("ERROR : %q\n", err)
+	}
 
 	for i := 0; i < workersCnt; i++ {
 		wg.Add(1)
 	}
-	//https://www.youtube.com/watch?v=V-VRVWdAUgA
-	//https://www.youtube.com/watch?v=6JcPRFEENVs
-	//https://dev.to/adriandy89/understanding-golang-object-oriented-programming-oop-with-examples-15l6
 
 	sc1.Run(&wg, conn, workersCnt)
 }
+
+//https://www.youtube.com/watch?v=V-VRVWdAUgA
+//https://www.youtube.com/watch?v=6JcPRFEENVs
+//https://dev.to/adriandy89/understanding-golang-object-oriented-programming-oop-with-examples-15l6
