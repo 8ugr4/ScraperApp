@@ -66,6 +66,11 @@ func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) {
 		},
 	}
 
+	conn, err := ct.connect()
+	if err != nil {
+		fmt.Printf("ERROR : %q\n", err)
+	}
+
 	// takes the row count of the InputTable.
 
 	u.countOfUrl = ct.CountRows(conn)
@@ -204,11 +209,6 @@ func main() {
 	var conn driver.Conn
 
 	sc1 := New("localhost", "9000", "default", "", "chDatabasename", "urls_to_parse", "url_parse_results")
-
-	conn, err := sc1.connect()
-	if err != nil {
-		fmt.Printf("ERROR : %q\n", err)
-	}
 
 	for i := 0; i < workersCnt; i++ {
 		wg.Add(1)
