@@ -15,7 +15,7 @@ type URL struct {
 	conn          driver.Conn
 	url           string
 	chHost        string
-	chPort        int // make this an int
+	chPort        int 
 	chUser        string
 	chPassword    string
 	chDatabase    string
