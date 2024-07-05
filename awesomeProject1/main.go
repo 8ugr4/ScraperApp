@@ -12,17 +12,17 @@ import (
 )
 
 type URL struct {
-	conn              driver.Conn
-	url               string
-	chHost            string
-	chPort            string
-	chUser            string
-	chPassword        string
-	chDatabasename    string
-	chInputTablename  string
-	chOutputTablename string
-	errorMsg          string
-	countOfUrl        int
+	conn          driver.Conn
+	url           string
+	chHost        string
+	chPort        int // make this an int
+	chUser        string
+	chPassword    string
+	chDatabase    string
+	chInputTable  string
+	chOutputTable string
+	errorMsg      string
+	countOfUrl    int
 }
 
 type Response struct {
@@ -39,15 +39,15 @@ var (
 
 // as default, chHost:localhost, chPort:9000 ... as follows.
 
-func New(chHost, chPort, chUser, chPassword, chDatabasename, chInputTablename, chOutputTablename string) *URL {
+func New(chPort int, chHost, chUser, chPassword, chDatabase, chInputTable, chOutputTable string) *URL {
 	return &URL{
-		chHost:            chHost,
-		chPort:            chPort,
-		chUser:            chUser,
-		chPassword:        chPassword,
-		chDatabasename:    chDatabasename,
-		chInputTablename:  chInputTablename,
-		chOutputTablename: chOutputTablename,
+		chHost:        chHost,
+		chPort:        chPort,
+		chUser:        chUser,
+		chPassword:    chPassword,
+		chDatabase:    chDatabase,
+		chInputTable:  chInputTable,
+		chOutputTable: chOutputTable,
 	}
 }
 
@@ -55,16 +55,9 @@ func New(chHost, chPort, chUser, chPassword, chDatabasename, chInputTablename, c
 // calls the necessary functions to read from given InputTableName (Ch),
 // parses them, writes them into given OutputTableName into Clickhouse.
 
-func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) {
+func (u *URL) Run(wg *sync.WaitGroup, workersCnt int) {
 
-	ct := chTransfer{
-		URL: &URL{
-			chInputTablename:  "urls_to_parse",
-			chHost:            "localhost",
-			chPort:            "9000",
-			chOutputTablename: "OutputTable",
-		},
-	}
+	ct := chTransfer{}
 
 	conn, err := ct.connect()
 	if err != nil {
@@ -100,14 +93,7 @@ func (u *URL) Run(wg *sync.WaitGroup, conn driver.Conn, workersCnt int) {
 
 func (u *URL) readFile(conn driver.Conn, urlStrCh chan string) {
 
-	ct := chTransfer{
-		URL: &URL{
-			chInputTablename:  "urls_to_parse",
-			chHost:            "localhost",
-			chPort:            "9000",
-			chOutputTablename: "OutputTable",
-		},
-	}
+	ct := chTransfer{URL: &URL{}}
 
 	err := ct.readFromCh(conn, urlStrCh)
 	if err != nil {
@@ -188,12 +174,7 @@ func (u *URL) writeIntoFile(wg *sync.WaitGroup, conn driver.Conn, parseCh <-chan
 	}()
 
 	ct := chTransfer{
-		URL: &URL{
-			chHost:            "localhost",
-			chPort:            "9000",
-			chOutputTablename: "OutputTable",
-		},
-	}
+		URL: &URL{}}
 
 	err := ct.writeIntoCh(wg, conn, ch1, count)
 
@@ -205,16 +186,15 @@ func (u *URL) writeIntoFile(wg *sync.WaitGroup, conn driver.Conn, parseCh <-chan
 func main() {
 
 	workersCnt := 4
+
+	sc1 := New(9000, "localhost", "default", "", "chDatabase", "urls_to_parse", "url_parse_results")
+
 	var wg sync.WaitGroup
-	var conn driver.Conn
-
-	sc1 := New("localhost", "9000", "default", "", "chDatabasename", "urls_to_parse", "url_parse_results")
-
 	for i := 0; i < workersCnt; i++ {
 		wg.Add(1)
 	}
 
-	sc1.Run(&wg, conn, workersCnt)
+	sc1.Run(&wg, workersCnt)
 }
 
 //https://www.youtube.com/watch?v=V-VRVWdAUgA
