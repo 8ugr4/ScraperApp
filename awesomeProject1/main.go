@@ -15,7 +15,7 @@ type URL struct {
 	conn          driver.Conn
 	url           string
 	chHost        string
-	chPort        int 
+	chPort        int
 	chUser        string
 	chPassword    string
 	chDatabase    string
@@ -57,7 +57,10 @@ func New(chPort int, chHost, chUser, chPassword, chDatabase, chInputTable, chOut
 
 func (u *URL) Run(wg *sync.WaitGroup, workersCnt int) {
 
-	ct := chTransfer{}
+	ct := chTransfer{URL: &URL{
+		chHost: u.chHost,
+		chPort: u.chPort,
+	}}
 
 	conn, err := ct.connect()
 	if err != nil {
