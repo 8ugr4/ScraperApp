@@ -123,7 +123,7 @@ func (u *URL) connect() (driver.Conn, error) {
 	host, port := u.chHost, u.chPort
 
 	conn, err := clickhouse.Open(&clickhouse.Options{
-		Addr: []string{fmt.Sprintf("%s:%s", host, port)},
+		Addr: []string{fmt.Sprintf("%s:%d", host, port)},
 		Auth: clickhouse.Auth{
 			Database: "default",
 			Username: "default",
