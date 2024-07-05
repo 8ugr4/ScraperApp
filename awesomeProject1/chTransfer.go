@@ -34,7 +34,12 @@ func (ct *chTransfer) CountRows(conn driver.Conn) int {
 		fmt.Printf("couldn't select from table: %q", err)
 	}
 
-	defer rows.Close()
+	defer func(rows driver.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 	i := 0
 
 	for rows.Next() {
@@ -58,7 +63,12 @@ func (ct *chTransfer) readFromCh(conn driver.Conn, inChan chan string) error {
 	if err != nil {
 		return fmt.Errorf("couldn't select from table: %q", err)
 	}
-	defer rows.Close()
+	defer func(rows driver.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 
 	for rows.Next() {
 
@@ -87,7 +97,7 @@ func (ct *chTransfer) writeIntoCh(wg *sync.WaitGroup, conn driver.Conn, ch1 chan
 		return fmt.Errorf("couldn't create table: %q \n", err)
 	}
 
-	err1 := conn.Exec(ctx, "INSERT into OutputTable (url,status,body_length) values ('www.testTESTtest.com','1234 okOK',1230321)")
+	err1 := conn.Exec(ctx, "INSERT into OutputTable (url,status,body_length) values ('www.testTEST-test.com','1234 okOK',1230321)")
 	if err1 != nil {
 		return fmt.Errorf("couldn't insert into table %q\n", err1)
 	}
