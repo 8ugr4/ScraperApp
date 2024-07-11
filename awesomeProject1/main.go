@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	"web-scraper-go/pkg/test"
 )
 
 type URL struct {
@@ -79,10 +80,14 @@ func (u *URL) Run(wg *sync.WaitGroup, workersCnt int) {
 
 	// URL channel.
 	urlStrCh := make(chan string, workersCnt)
+
+	// control channel
+	controlCh := make(chan string, u.countOfUrl)
+
 	// Parsed URL channel.
 	parseCh := make(chan *Response, u.countOfUrl)
 
-	go u.readFile(conn, urlStrCh)
+	go u.readFile(conn, urlStrCh, controlCh)
 
 	for workerId := 0; workerId < workersCnt; workerId++ {
 		wg.Add(1)
@@ -94,11 +99,13 @@ func (u *URL) Run(wg *sync.WaitGroup, workersCnt int) {
 	defer wg.Done()
 }
 
-func (u *URL) readFile(conn driver.Conn, urlStrCh chan string) {
+// reads the InputTable from Clickhouse
+
+func (u *URL) readFile(conn driver.Conn, urlStrCh chan string, controlCh chan string) {
 
 	ct := chTransfer{URL: &URL{}}
 
-	err := ct.readFromCh(conn, urlStrCh)
+	err := ct.readFromCh(conn, urlStrCh, controlCh)
 	if err != nil {
 		log.Fatalf("could not read a line from the database: %v", err)
 	}
@@ -154,12 +161,14 @@ func (u *URL) parseUrl(urlStr string) *Response {
 // reads from UrlStrChannel, sends the URL's to be parsed.
 
 func (u *URL) httpWorker(wg *sync.WaitGroup, urlStrCh <-chan string, parseCh chan<- *Response) {
+
 	defer wg.Done()
+
 	for urlStr := range urlStrCh {
-		parseCh <- u.parseUrl(urlStr)
-
+		if test.IsValidURL(urlStr) {
+			parseCh <- u.parseUrl(urlStr)
+		}
 	}
-
 }
 
 // writeIntoFile sends the URL's to ch.WriteIntoCh
