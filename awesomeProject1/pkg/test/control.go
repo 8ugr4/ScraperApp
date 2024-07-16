@@ -24,23 +24,3 @@ func IsValidURL(url string) bool {
 	rgx := regexp.MustCompile(pattern)
 	return rgx.MatchString(url)
 }
-
-func checkListOfURLs(urls []string) []string {
-
-	var result []string
-
-	for _, url := range urls {
-		IsValidURL, _ := regexp.MatchString(pattern, url)
-		if IsValidURL {
-			result = append(result, url)
-		}
-	}
-	return result
-}
-
-//func bam() *address {
-//	return &address{
-//		url:    "a",
-//		domain: "a",
-//	}
-//}
