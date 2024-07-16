@@ -6,7 +6,6 @@
 
 // TO-DO SHORT TERM 
 
-// finish and fix control.go file
 // create a test.go file to give different type of input
 // and use the functions inside control.go to test.
 
@@ -29,4 +28,8 @@
 // problems with SQL inputs. -- > SOLVED. use DebugInCH() to test inputs.
 
 
-// last problemless commit : 05.07.2024 15.00
+// last problemless commit : 16.07.2024 12.00
+
+
+// DONE:
+// finish and fix control.go file
